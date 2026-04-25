@@ -1,0 +1,1760 @@
+-- BUG TOOLS
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+local camera = Workspace.CurrentCamera
+
+local loadingGui = Instance.new("ScreenGui")
+loadingGui.Name = "BugToolsLoading"
+loadingGui.ResetOnSpawn = false
+loadingGui.Parent = player.PlayerGui
+
+local loadingFrame = Instance.new("Frame", loadingGui)
+loadingFrame.Size = UDim2.new(0, 260, 0, 40)
+loadingFrame.Position = UDim2.new(0.5, -130, 0.5, -20)
+loadingFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+loadingFrame.BackgroundTransparency = 0.2
+loadingFrame.BorderSizePixel = 0
+Instance.new("UICorner", loadingFrame).CornerRadius = UDim.new(0, 10)
+
+local loadingLabel = Instance.new("TextLabel", loadingFrame)
+loadingLabel.Size = UDim2.new(1, 0, 1, 0)
+loadingLabel.BackgroundTransparency = 1
+loadingLabel.TextColor3 = Color3.fromRGB(255, 220, 50)
+loadingLabel.Font = Enum.Font.SourceSansBold
+loadingLabel.TextSize = 15
+loadingLabel.Text = "Loading script..."
+
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+local function splitStr(str, sep)
+    local result = {}
+    for part in (str..sep):gmatch("(.-)"..sep) do
+        table.insert(result, part)
+    end
+    return result
+end
+
+local grabtoolsFunc = nil
+local grabtoolsEnabled = false
+
+local function grabInitialTools()
+    if not character or not humanoid then return end
+    for _, child in ipairs(Workspace:GetChildren()) do
+        if child:IsA("BackpackItem") and child:FindFirstChild("Handle") then
+            pcall(function() humanoid:EquipTool(child) end)
+        end
+    end
+end
+
+local function startGrabTools(button)
+    if grabtoolsFunc then grabtoolsFunc:Disconnect() end
+    grabtoolsEnabled = true
+    grabInitialTools()
+    grabtoolsFunc = Workspace.ChildAdded:Connect(function(child)
+        if character and grabtoolsEnabled and child:IsA("BackpackItem") and child:FindFirstChild("Handle") then
+            pcall(function() humanoid:EquipTool(child) end)
+        end
+    end)
+    if button then button.Text="Grabtools: ON"; button.BackgroundColor3=Color3.fromRGB(0,150,0) end
+end
+
+local function stopGrabTools(button)
+    grabtoolsEnabled = false
+    if grabtoolsFunc then grabtoolsFunc:Disconnect() grabtoolsFunc=nil end
+    if button then button.Text="Grabtools: OFF"; button.BackgroundColor3=Color3.fromRGB(50,50,50) end
+end
+
+player.CharacterAdded:Connect(function(newChar)
+    character=newChar; humanoid=character:WaitForChild("Humanoid"); camera=Workspace.CurrentCamera
+    if grabtoolsEnabled then wait(1) startGrabTools(nil) end
+end)
+
+local killNotifEnabled = false
+local watchList = {}
+
+local function showNotif(msg)
+    local existingGui=player.PlayerGui:FindFirstChild("KillNotifGui")
+    if existingGui then existingGui:Destroy() end
+    local gui=Instance.new("ScreenGui")
+    gui.Name="KillNotifGui"; gui.ResetOnSpawn=false; gui.Parent=player.PlayerGui
+    local frame=Instance.new("Frame")
+    frame.Size=UDim2.new(0,480,0,70); frame.Position=UDim2.new(0.5,-240,0.4,0)
+    frame.BackgroundColor3=Color3.fromRGB(0,0,0); frame.BackgroundTransparency=0.4
+    frame.BorderSizePixel=0; frame.Parent=gui
+    Instance.new("UICorner",frame).CornerRadius=UDim.new(0,12)
+    local lbl=Instance.new("TextLabel")
+    lbl.Size=UDim2.new(1,-20,1,0); lbl.Position=UDim2.new(0,10,0,0)
+    lbl.BackgroundTransparency=1; lbl.TextColor3=Color3.fromRGB(255,255,255)
+    lbl.Font=Enum.Font.SourceSansBold; lbl.TextSize=17
+    lbl.TextWrapped=true; lbl.Text=msg; lbl.Parent=frame
+    task.delay(5,function()
+        if gui and gui.Parent then
+            TweenService:Create(frame,TweenInfo.new(0.5),{BackgroundTransparency=1}):Play()
+            TweenService:Create(lbl,TweenInfo.new(0.5),{TextTransparency=1}):Play()
+            task.wait(0.5); gui:Destroy()
+        end
+    end)
+end
+
+local function hookCharacterKill(targetPlayer,char)
+    local hum=char:WaitForChild("Humanoid",5); if not hum then return end
+    hum.Died:Connect(function()
+        if not killNotifEnabled then return end
+        if targetPlayer~=player and not watchList[targetPlayer.Name] then return end
+        local creatorTag=hum:FindFirstChild("creator"); local killerPlayer=nil
+        if creatorTag then
+            if creatorTag:IsA("ObjectValue") and creatorTag.Value then
+                if creatorTag.Value:IsA("Player") then killerPlayer=creatorTag.Value
+                elseif creatorTag.Value:IsA("Model") then killerPlayer=Players:GetPlayerFromCharacter(creatorTag.Value) end
+            elseif creatorTag:IsA("StringValue") and creatorTag.Value~="" then
+                killerPlayer=Players:FindFirstChild(creatorTag.Value)
+            end
+        end
+        local ks=killerPlayer and (killerPlayer.DisplayName.." (@"..killerPlayer.Name..")") or "Unknown"
+        if targetPlayer==player then showNotif("You were killed by "..ks)
+        else showNotif(targetPlayer.DisplayName.." (@"..targetPlayer.Name..") was killed by "..ks) end
+    end)
+end
+
+local function connectSelfKill()
+    local function hookSelf(c) hookCharacterKill(player,c) end
+    if player.Character then hookSelf(player.Character) end
+    player.CharacterAdded:Connect(function(c) task.wait(0.5) hookSelf(c) end)
+end
+connectSelfKill()
+
+local function hookWatchPlayer(p)
+    local function onChar(c) task.wait(0.5) hookCharacterKill(p,c) end
+    if p.Character then onChar(p.Character) end
+    p.CharacterAdded:Connect(onChar)
+end
+for _,p in ipairs(Players:GetPlayers()) do if p~=player then hookWatchPlayer(p) end end
+Players.PlayerAdded:Connect(function(p) hookWatchPlayer(p) end)
+
+local function findPlayer(input)
+    if not input or input=="" then return nil end
+    for _,p in ipairs(Players:GetPlayers()) do
+        if p~=player and p.DisplayName:lower():sub(1,#input)==input:lower() then return p end
+    end
+    for _,p in ipairs(Players:GetPlayers()) do
+        if p~=player and p.Name:lower():sub(1,#input)==input:lower() then return p end
+    end
+    for _,p in ipairs(Players:GetPlayers()) do
+        if p~=player then
+            if p.DisplayName:lower():find(input:lower(),1,true) or
+               p.Name:lower():find(input:lower(),1,true) then return p end
+        end
+    end
+    return nil
+end
+
+local function findPlayers(input)
+    if not input or input=="" then return {} end
+    local results={}; local seen={}
+    for _,name in ipairs(splitStr(input,",")) do
+        name=name:match("^%s*(.-)%s*$")
+        if name~="" then
+            local found=findPlayer(name)
+            if found and not seen[found] then seen[found]=true; table.insert(results,found) end
+        end
+    end
+    return results
+end
+
+local BODY_PARTS={"HumanoidRootPart","Head","Torso","Left Arm","Right Arm","Left Leg","Right Leg",
+    "UpperTorso","LowerTorso","LeftUpperArm","LeftLowerArm","LeftHand",
+    "RightUpperArm","RightLowerArm","RightHand","LeftUpperLeg","LeftLowerLeg",
+    "LeftFoot","RightUpperLeg","RightLowerLeg","RightFoot"}
+local BODY_SET={}
+for _,v in ipairs(BODY_PARTS) do BODY_SET[v]=true end
+local espData={}; local locateData={}
+local ESP_COLOR=Color3.fromRGB(255,60,60); local LOCATE_COLOR=Color3.fromRGB(60,180,255)
+
+local function getPlayerHP(p)
+    local char=p.Character; if not char then return nil,nil end
+    local hum=char:FindFirstChildOfClass("Humanoid"); if not hum then return nil,nil end
+    return math.floor(hum.Health), math.floor(hum.MaxHealth)
+end
+
+local function getHPColor(hp,maxhp)
+    if not hp or not maxhp or maxhp==0 then return Color3.fromRGB(200,200,200) end
+    local pct=hp/maxhp
+    if pct>0.6 then return Color3.fromRGB(80,255,80)
+    elseif pct>0.3 then return Color3.fromRGB(255,200,50)
+    else return Color3.fromRGB(255,60,60) end
+end
+
+local function createHitboxBoxes(char,color,storage)
+    for _,part in ipairs(char:GetChildren()) do
+        if part:IsA("BasePart") and BODY_SET[part.Name] then
+            local sel=Instance.new("SelectionBox")
+            sel.Adornee=part; sel.Color3=color; sel.LineThickness=0.02
+            sel.SurfaceTransparency=1; sel.Parent=Workspace; table.insert(storage,sel)
+        end
+    end
+end
+
+local function removeESPFor(p)
+    if espData[p] then
+        pcall(function() espData[p].billboard:Destroy() end)
+        for _,box in ipairs(espData[p].boxes) do pcall(function() box:Destroy() end) end
+        espData[p]=nil
+    end
+end
+
+local function removeLocateFor(p)
+    if locateData[p] then
+        pcall(function() locateData[p].billboard:Destroy() end)
+        for _,box in ipairs(locateData[p].boxes) do pcall(function() box:Destroy() end) end
+        locateData[p]=nil
+    end
+end
+
+local function addESPFor(p)
+    if p==player then return end; removeESPFor(p)
+    local char=p.Character; if not char then return end
+    local root=char:FindFirstChild("HumanoidRootPart"); if not root then return end
+    local boxes={}
+    local bb=Instance.new("BillboardGui")
+    bb.Adornee=root; bb.Size=UDim2.new(0,140,0,42); bb.StudsOffset=Vector3.new(0,3.5,0)
+    bb.AlwaysOnTop=true; bb.Parent=root
+    local nameLbl=Instance.new("TextLabel",bb)
+    nameLbl.Size=UDim2.new(1,0,0,20); nameLbl.Position=UDim2.new(0,0,0,0)
+    nameLbl.BackgroundTransparency=1; nameLbl.TextColor3=ESP_COLOR
+    nameLbl.Font=Enum.Font.SourceSansBold; nameLbl.TextSize=13; nameLbl.TextStrokeTransparency=0
+    nameLbl.Text=p.DisplayName.." (@"..p.Name..")"
+    local hpLbl=Instance.new("TextLabel",bb)
+    hpLbl.Size=UDim2.new(1,0,0,18); hpLbl.Position=UDim2.new(0,0,0,22)
+    hpLbl.BackgroundTransparency=1; hpLbl.Font=Enum.Font.SourceSansBold
+    hpLbl.TextSize=12; hpLbl.TextStrokeTransparency=0
+    local hp,maxhp=getPlayerHP(p)
+    hpLbl.Text=hp and ("HP "..hp.." / "..maxhp) or "HP ?"
+    hpLbl.TextColor3=getHPColor(hp,maxhp)
+    createHitboxBoxes(char,ESP_COLOR,boxes)
+    espData[p]={billboard=bb,boxes=boxes,hpLbl=hpLbl}
+end
+
+local function addLocateFor(p)
+    if p==player then return end; removeLocateFor(p)
+    local char=p.Character; if not char then return end
+    local root=char:FindFirstChild("HumanoidRootPart"); if not root then return end
+    local boxes={}
+    local bb=Instance.new("BillboardGui")
+    bb.Adornee=root; bb.Size=UDim2.new(0,160,0,42); bb.StudsOffset=Vector3.new(0,5,0)
+    bb.AlwaysOnTop=true; bb.Parent=root
+    local nameLbl=Instance.new("TextLabel",bb)
+    nameLbl.Size=UDim2.new(1,0,0,20); nameLbl.Position=UDim2.new(0,0,0,0)
+    nameLbl.BackgroundTransparency=1; nameLbl.TextColor3=LOCATE_COLOR
+    nameLbl.Font=Enum.Font.SourceSansBold; nameLbl.TextSize=13; nameLbl.TextStrokeTransparency=0
+    nameLbl.Text="[LOC] "..p.DisplayName.." (@"..p.Name..")"
+    local hpLbl=Instance.new("TextLabel",bb)
+    hpLbl.Size=UDim2.new(1,0,0,18); hpLbl.Position=UDim2.new(0,0,0,22)
+    hpLbl.BackgroundTransparency=1; hpLbl.Font=Enum.Font.SourceSansBold
+    hpLbl.TextSize=12; hpLbl.TextStrokeTransparency=0
+    local hp,maxhp=getPlayerHP(p)
+    hpLbl.Text=hp and ("HP "..hp.." / "..maxhp) or "HP ?"
+    hpLbl.TextColor3=getHPColor(hp,maxhp)
+    createHitboxBoxes(char,LOCATE_COLOR,boxes)
+    locateData[p]={billboard=bb,boxes=boxes,hpLbl=hpLbl}
+end
+
+local toolHitboxEnabled=false; local toolHitboxData={}
+local TOOL_HB_COLOR=Color3.fromRGB(255,0,0)
+
+local function updateToolHitboxFor(p)
+    local char=p.Character
+    local tool=char and char:FindFirstChildWhichIsA("Tool")
+    local handle=tool and tool:FindFirstChild("Handle")
+    local data=toolHitboxData[p]
+    if handle then
+        if not data or data.lastHandle~=handle then
+            if data and data.selBox then pcall(function() data.selBox:Destroy() end) end
+            local sel=Instance.new("SelectionBox")
+            sel.Adornee=handle; sel.Color3=TOOL_HB_COLOR; sel.LineThickness=0.05
+            sel.SurfaceColor3=TOOL_HB_COLOR; sel.SurfaceTransparency=0.75; sel.Parent=Workspace
+            toolHitboxData[p]={selBox=sel,lastHandle=handle}
+        end
+    else
+        if data and data.selBox then pcall(function() data.selBox:Destroy() end); toolHitboxData[p]=nil end
+    end
+end
+
+local function clearAllToolHitboxes()
+    for _,data in pairs(toolHitboxData) do
+        if data and data.selBox then pcall(function() data.selBox:Destroy() end) end
+    end
+    toolHitboxData={}
+end
+
+local touchFlingEnabled=false; local touchFlingConn=nil
+local FLING_FORCE=380
+
+local function setupTouchFling()
+    if touchFlingConn then touchFlingConn:Disconnect() touchFlingConn=nil end
+    local char=player.Character; if not char then return end
+    local root=char:FindFirstChild("HumanoidRootPart"); if not root then return end
+    touchFlingConn=root.Touched:Connect(function(hit)
+        if not touchFlingEnabled then return end
+        local hitChar=hit.Parent; if not hitChar then return end
+        local hitPlayer=Players:GetPlayerFromCharacter(hitChar)
+        if not hitPlayer or hitPlayer==player then return end
+        local hitRoot=hitChar:FindFirstChild("HumanoidRootPart"); if not hitRoot then return end
+        local hitHum=hitChar:FindFirstChildOfClass("Humanoid")
+        if not hitHum or hitHum.Health<=0 then return end
+        local dir=(hitRoot.Position-root.Position)
+        if dir.Magnitude<0.01 then dir=Vector3.new(1,0,0) end
+        local flingDir=(dir.Unit+Vector3.new(0,0.5,0)).Unit
+        pcall(function()
+            local oldBV=hitRoot:FindFirstChild("WFlingBV"); if oldBV then oldBV:Destroy() end
+            local oldBG=hitRoot:FindFirstChild("WFlingBG"); if oldBG then oldBG:Destroy() end
+            local bg=Instance.new("BodyGyro")
+            bg.Name="WFlingBG"; bg.MaxTorque=Vector3.new(1e6,1e6,1e6)
+            bg.P=1e6; bg.CFrame=hitRoot.CFrame; bg.Parent=hitRoot
+            local bv=Instance.new("BodyVelocity")
+            bv.Name="WFlingBV"; bv.Velocity=flingDir*FLING_FORCE
+            bv.MaxForce=Vector3.new(1e6,1e6,1e6); bv.P=1e6; bv.Parent=hitRoot
+            task.delay(0.2,function()
+                if bv and bv.Parent then bv:Destroy() end
+                if bg and bg.Parent then bg:Destroy() end
+            end)
+        end)
+    end)
+end
+
+local stareLine=nil; local stareLinePart=nil
+
+local function createStareLine()
+    pcall(function()
+        if stareLine then stareLine:Destroy() end
+        if stareLinePart then stareLinePart:Destroy() end
+    end)
+    stareLine=nil; stareLinePart=nil
+    local myChar=player.Character; if not myChar then return end
+    local myRoot=myChar:FindFirstChild("HumanoidRootPart"); if not myRoot then return end
+    local p=Instance.new("Part")
+    p.Name="StareLinePart"; p.Size=Vector3.new(0.05,0.05,0.05)
+    p.Anchored=true; p.CanCollide=false; p.Transparency=1
+    p.CFrame=myRoot.CFrame; p.Parent=Workspace
+    stareLinePart=p
+    local line=Instance.new("LineHandleAdornment")
+    line.Name="StareLine"; line.Adornee=p; line.Length=0; line.Thickness=3
+    line.Color3=Color3.fromRGB(255,50,50); line.AlwaysOnTop=true
+    line.Transparency=0; line.ZIndex=5; line.Parent=p
+    stareLine=line
+end
+
+local function destroyStareLine()
+    pcall(function()
+        if stareLine then stareLine:Destroy() end
+        if stareLinePart then stareLinePart:Destroy() end
+    end)
+    stareLine=nil; stareLinePart=nil
+end
+
+local function updateStareLine(originPos,targetPos)
+    if not stareLine or not stareLinePart then return end
+    pcall(function()
+        local dir=targetPos-originPos; local dist=dir.Magnitude
+        if dist<0.1 then return end
+        stareLinePart.CFrame=CFrame.lookAt(originPos,targetPos)
+        stareLine.Length=dist; stareLine.CFrame=CFrame.new(0,0,-dist/2)
+    end)
+end
+
+local ScreenGui=Instance.new("ScreenGui")
+ScreenGui.ZIndexBehavior=Enum.ZIndexBehavior.Global
+ScreenGui.Parent=game.CoreGui; ScreenGui.Name="BugToolsGui"
+
+local MainFrame=Instance.new("Frame")
+local FRAME_W=220; local FRAME_H_CLOSED=35; local FRAME_H_OPEN=400
+MainFrame.Parent=ScreenGui; MainFrame.BackgroundColor3=Color3.fromRGB(25,25,25)
+MainFrame.Size=UDim2.new(0,FRAME_W,0,FRAME_H_OPEN); MainFrame.AnchorPoint=Vector2.new(0.5,0)
+MainFrame.Position=UDim2.new(0.5,0,0.05,0); MainFrame.BackgroundTransparency=0.2
+MainFrame.ClipsDescendants=true
+Instance.new("UICorner",MainFrame).CornerRadius=UDim.new(0,15)
+
+local TitleLabel=Instance.new("TextLabel",MainFrame)
+TitleLabel.Text="Rion xploit"; TitleLabel.Size=UDim2.new(0,185,0,35)
+TitleLabel.Position=UDim2.new(0,10,0,0); TitleLabel.BackgroundTransparency=1
+TitleLabel.TextColor3=Color3.fromRGB(255,255,255); TitleLabel.Font=Enum.Font.SourceSansBold
+TitleLabel.TextSize=15; TitleLabel.TextXAlignment=Enum.TextXAlignment.Left
+
+local MinimizeButton=Instance.new("TextButton",MainFrame)
+MinimizeButton.Text="-"; MinimizeButton.Size=UDim2.new(0,28,0,28)
+MinimizeButton.Position=UDim2.new(0,FRAME_W-33,0,4); MinimizeButton.BackgroundColor3=Color3.fromRGB(70,70,70)
+MinimizeButton.TextColor3=Color3.fromRGB(255,255,255); MinimizeButton.Font=Enum.Font.SourceSansBold
+MinimizeButton.TextSize=16; MinimizeButton.ZIndex=5
+Instance.new("UICorner",MinimizeButton).CornerRadius=UDim.new(0,6)
+
+local PageContainer=Instance.new("Frame",MainFrame)
+PageContainer.BackgroundTransparency=1; PageContainer.Size=UDim2.new(0,FRAME_W*10,0,700)
+PageContainer.Position=UDim2.new(0,0,0,35); PageContainer.ClipsDescendants=false
+
+local pages={}; local totalPages=10
+for i=1,totalPages do
+    local pg=Instance.new("Frame",PageContainer)
+    pg.BackgroundTransparency=1; pg.Size=UDim2.new(0,FRAME_W,0,700)
+    pg.Position=UDim2.new(0,(i-1)*FRAME_W,0,0); pages[i]=pg
+end
+
+local BTN_H=44; local BOX_H=20; local GAP=1
+local BTN_W=170; local KEY_W=30; local KEY_H=15; local KEY_X=10+BTN_W+3
+local pageY={}; local featureCount={}
+for i=1,totalPages do pageY[i]=0; featureCount[i]=0 end
+local buildPage=1; local keyPairList={}; local RESERVED_KEYS={K=true}
+
+local function makeKeyBox(parent,posY)
+    local kb=Instance.new("TextBox",parent)
+    kb.PlaceholderText="key"; kb.Text=""
+    kb.Size=UDim2.new(0,KEY_W,0,KEY_H)
+    kb.Position=UDim2.new(0,KEY_X,0,posY+math.floor((BTN_H-KEY_H)/2))
+    kb.BackgroundColor3=Color3.fromRGB(35,35,35); kb.TextColor3=Color3.fromRGB(255,220,50)
+    kb.PlaceholderColor3=Color3.fromRGB(90,90,90); kb.Font=Enum.Font.SourceSansBold
+    kb.TextSize=11; kb.ClearTextOnFocus=false; kb.BorderSizePixel=0
+    Instance.new("UICorner",kb).CornerRadius=UDim.new(0,4)
+    kb.FocusLost:Connect(function()
+        if #kb.Text>=1 then
+            local k=kb.Text:sub(1,1):upper()
+            if RESERVED_KEYS[k] then
+                kb.Text=""; kb.PlaceholderText=k.." reserved!"
+                task.delay(1.5,function() kb.PlaceholderText="key" end)
+            else kb.Text=k end
+        end
+    end)
+    return kb
+end
+
+local function addBtn(text)
+    if featureCount[buildPage]>=5 then buildPage=buildPage+1 end
+    local posY=pageY[buildPage]
+    local btn=Instance.new("TextButton",pages[buildPage])
+    btn.Text=text; btn.Size=UDim2.new(0,BTN_W,0,BTN_H); btn.Position=UDim2.new(0,10,0,posY)
+    btn.BackgroundColor3=Color3.fromRGB(50,50,50); btn.TextColor3=Color3.fromRGB(255,255,255)
+    btn.Font=Enum.Font.SourceSans; btn.TextSize=15
+    btn.TextXAlignment=Enum.TextXAlignment.Left; btn.TextTruncate=Enum.TextTruncate.AtEnd
+    Instance.new("UICorner",btn).CornerRadius=UDim.new(0,10)
+    local keyBox=makeKeyBox(pages[buildPage],posY)
+    pageY[buildPage]=posY+BTN_H+GAP; featureCount[buildPage]=featureCount[buildPage]+1
+    return btn,keyBox
+end
+
+local function addBox(placeholder,onListClick)
+    local posY=pageY[buildPage]; local hasBtn=onListClick~=nil
+    local box=Instance.new("TextBox",pages[buildPage])
+    box.PlaceholderText=placeholder; box.Text=""
+    box.Size=UDim2.new(0,hasBtn and 172 or 200,0,BOX_H)
+    box.Position=UDim2.new(0,10,0,posY)
+    box.BackgroundColor3=Color3.fromRGB(40,40,40); box.TextColor3=Color3.fromRGB(255,255,255)
+    box.PlaceholderColor3=Color3.fromRGB(130,130,130); box.Font=Enum.Font.SourceSans
+    box.TextSize=13; box.ClearTextOnFocus=false; box.BorderSizePixel=0
+    Instance.new("UICorner",box).CornerRadius=UDim.new(0,6)
+    if hasBtn then
+        local lb=Instance.new("TextButton",pages[buildPage])
+        lb.Text="="; lb.Size=UDim2.new(0,24,0,BOX_H); lb.Position=UDim2.new(0,186,0,posY)
+        lb.BackgroundColor3=Color3.fromRGB(60,60,60); lb.TextColor3=Color3.fromRGB(255,255,255)
+        lb.Font=Enum.Font.SourceSansBold; lb.TextSize=14; lb.BorderSizePixel=0
+        Instance.new("UICorner",lb).CornerRadius=UDim.new(0,5)
+        lb.MouseButton1Click:Connect(function() onListClick() end)
+    end
+    pageY[buildPage]=posY+BOX_H+GAP
+    return box
+end
+
+local plPanel = Instance.new("Frame", ScreenGui)
+plPanel.Name = "PlayerLeaderboard"
+plPanel.Size = UDim2.new(0, 230, 0, 360)
+plPanel.Position = UDim2.new(0.5, 18, 0.05, 0)
+plPanel.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+plPanel.BackgroundTransparency = 0
+plPanel.BorderSizePixel = 0
+plPanel.Visible = false
+plPanel.ZIndex = 50
+Instance.new("UICorner", plPanel).CornerRadius = UDim.new(0, 14)
+
+local plAccent = Instance.new("Frame", plPanel)
+plAccent.Size = UDim2.new(1, 0, 0, 3)
+plAccent.Position = UDim2.new(0, 0, 0, 0)
+plAccent.BackgroundColor3 = Color3.fromRGB(120, 80, 255)
+plAccent.BorderSizePixel = 0
+plAccent.ZIndex = 51
+Instance.new("UICorner", plAccent).CornerRadius = UDim.new(0, 14)
+
+local plHeader = Instance.new("Frame", plPanel)
+plHeader.Size = UDim2.new(1, 0, 0, 38)
+plHeader.Position = UDim2.new(0, 0, 0, 3)
+plHeader.BackgroundTransparency = 1
+plHeader.ZIndex = 51
+
+local plTitle = Instance.new("TextLabel", plHeader)
+plTitle.Text = "Players"
+plTitle.Size = UDim2.new(1, -44, 1, 0)
+plTitle.Position = UDim2.new(0, 12, 0, 0)
+plTitle.BackgroundTransparency = 1
+plTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+plTitle.Font = Enum.Font.GothamBold
+plTitle.TextSize = 14
+plTitle.TextXAlignment = Enum.TextXAlignment.Left
+plTitle.ZIndex = 52
+
+local plCloseBtn = Instance.new("TextButton", plHeader)
+plCloseBtn.Text = "X"
+plCloseBtn.Size = UDim2.new(0, 28, 0, 28)
+plCloseBtn.Position = UDim2.new(1, -34, 0.5, -14)
+plCloseBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+plCloseBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+plCloseBtn.Font = Enum.Font.GothamBold
+plCloseBtn.TextSize = 12
+plCloseBtn.BorderSizePixel = 0
+plCloseBtn.ZIndex = 52
+Instance.new("UICorner", plCloseBtn).CornerRadius = UDim.new(0, 8)
+plCloseBtn.MouseButton1Click:Connect(function() plPanel.Visible = false end)
+
+local plDivider = Instance.new("Frame", plPanel)
+plDivider.Size = UDim2.new(1, -20, 0, 1)
+plDivider.Position = UDim2.new(0, 10, 0, 41)
+plDivider.BackgroundColor3 = Color3.fromRGB(50, 50, 65)
+plDivider.BorderSizePixel = 0
+plDivider.ZIndex = 51
+
+local plScroll = Instance.new("ScrollingFrame", plPanel)
+plScroll.Size = UDim2.new(1, -8, 1, -50)
+plScroll.Position = UDim2.new(0, 4, 0, 46)
+plScroll.BackgroundTransparency = 1
+plScroll.BorderSizePixel = 0
+plScroll.ScrollBarThickness = 3
+plScroll.ScrollBarImageColor3 = Color3.fromRGB(120, 80, 255)
+plScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+plScroll.ZIndex = 51
+local plLayout = Instance.new("UIListLayout", plScroll)
+plLayout.Padding = UDim.new(0, 4)
+plLayout.SortOrder = Enum.SortOrder.LayoutOrder
+Instance.new("UIPadding", plScroll).PaddingTop = UDim.new(0, 2)
+
+local plOnAdd    = nil
+local plOnRemove = nil
+local plGetList  = nil
+
+local function plRefresh()
+    for _, c in ipairs(plScroll:GetChildren()) do
+        if c:IsA("Frame") then c:Destroy() end
+    end
+
+    local playerList = Players:GetPlayers()
+    local currentList = plGetList and plGetList() or {}
+    local count = 0
+
+    for _, p in ipairs(playerList) do
+        if p == player then continue end
+        count = count + 1
+
+        local inList = currentList[p.Name] == true
+
+        local row = Instance.new("Frame", plScroll)
+        row.Size = UDim2.new(1, -4, 0, 46)
+        row.BackgroundColor3 = inList and Color3.fromRGB(30, 20, 60) or Color3.fromRGB(22, 22, 30)
+        row.BorderSizePixel = 0
+        row.LayoutOrder = count
+        row.ZIndex = 52
+        Instance.new("UICorner", row).CornerRadius = UDim.new(0, 10)
+
+        if inList then
+            local strip = Instance.new("Frame", row)
+            strip.Size = UDim2.new(0, 3, 1, -10)
+            strip.Position = UDim2.new(0, 0, 0, 5)
+            strip.BackgroundColor3 = Color3.fromRGB(120, 80, 255)
+            strip.BorderSizePixel = 0
+            strip.ZIndex = 53
+            Instance.new("UICorner", strip).CornerRadius = UDim.new(0, 4)
+        end
+
+        local avatar = Instance.new("Frame", row)
+        avatar.Size = UDim2.new(0, 32, 0, 32)
+        avatar.Position = UDim2.new(0, 8, 0.5, -16)
+        avatar.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+        avatar.BorderSizePixel = 0
+        avatar.ZIndex = 53
+        Instance.new("UICorner", avatar).CornerRadius = UDim.new(0.5, 0)
+
+        local capP = p
+        task.spawn(function()
+            local ok, img = pcall(function()
+                return Players:GetUserThumbnailAsync(capP.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size60x60)
+            end)
+            if ok and img and avatar.Parent then
+                local il = Instance.new("ImageLabel", avatar)
+                il.Size = UDim2.new(1, 0, 1, 0)
+                il.BackgroundTransparency = 1
+                il.Image = img
+                il.ZIndex = 54
+                Instance.new("UICorner", il).CornerRadius = UDim.new(0.5, 0)
+            end
+        end)
+
+        local dispLbl = Instance.new("TextLabel", row)
+        dispLbl.Text = p.DisplayName
+        dispLbl.Size = UDim2.new(1, -96, 0, 18)
+        dispLbl.Position = UDim2.new(0, 46, 0, 6)
+        dispLbl.BackgroundTransparency = 1
+        dispLbl.TextColor3 = Color3.fromRGB(240, 240, 240)
+        dispLbl.Font = Enum.Font.GothamBold
+        dispLbl.TextSize = 13
+        dispLbl.TextXAlignment = Enum.TextXAlignment.Left
+        dispLbl.TextTruncate = Enum.TextTruncate.AtEnd
+        dispLbl.ZIndex = 53
+
+        local userLbl = Instance.new("TextLabel", row)
+        userLbl.Text = "@" .. p.Name
+        userLbl.Size = UDim2.new(1, -96, 0, 14)
+        userLbl.Position = UDim2.new(0, 46, 0, 25)
+        userLbl.BackgroundTransparency = 1
+        userLbl.TextColor3 = Color3.fromRGB(100, 100, 130)
+        userLbl.Font = Enum.Font.Gotham
+        userLbl.TextSize = 11
+        userLbl.TextXAlignment = Enum.TextXAlignment.Left
+        userLbl.TextTruncate = Enum.TextTruncate.AtEnd
+        userLbl.ZIndex = 53
+
+        local addB = Instance.new("TextButton", row)
+        addB.Text = "+"
+        addB.Size = UDim2.new(0, 26, 0, 26)
+        addB.Position = UDim2.new(1, -58, 0.5, -13)
+        addB.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
+        addB.TextColor3 = Color3.fromRGB(255, 255, 255)
+        addB.Font = Enum.Font.GothamBold
+        addB.TextSize = 16
+        addB.BorderSizePixel = 0
+        addB.ZIndex = 54
+        Instance.new("UICorner", addB).CornerRadius = UDim.new(0, 7)
+
+        local remB = Instance.new("TextButton", row)
+        remB.Text = "-"
+        remB.Size = UDim2.new(0, 26, 0, 26)
+        remB.Position = UDim2.new(1, -28, 0.5, -13)
+        remB.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+        remB.TextColor3 = Color3.fromRGB(255, 255, 255)
+        remB.Font = Enum.Font.GothamBold
+        remB.TextSize = 16
+        remB.BorderSizePixel = 0
+        remB.ZIndex = 54
+        Instance.new("UICorner", remB).CornerRadius = UDim.new(0, 7)
+
+        local capName = p.Name
+        addB.MouseButton1Click:Connect(function()
+            if plOnAdd then plOnAdd(capName) end
+            row.BackgroundColor3 = Color3.fromRGB(30, 20, 60)
+        end)
+        remB.MouseButton1Click:Connect(function()
+            if plOnRemove then plOnRemove(capName) end
+            row.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
+        end)
+    end
+
+    plScroll.CanvasSize = UDim2.new(0, 0, 0, count * 50)
+
+    if count == 0 then
+        local empty = Instance.new("TextLabel", plScroll)
+        empty.Text = "No players in server"
+        empty.Size = UDim2.new(1, 0, 0, 40)
+        empty.BackgroundTransparency = 1
+        empty.TextColor3 = Color3.fromRGB(80, 80, 100)
+        empty.Font = Enum.Font.GothamItalic
+        empty.TextSize = 13
+        empty.ZIndex = 52
+    end
+end
+
+local function openMultiPanel(title, targetBox)
+    plTitle.Text = title
+    plOnAdd = function(name)
+        local cur = targetBox.Text
+        local found = false
+        for v in (cur .. ","):gmatch("([^,]*),") do
+            if v:match("^%s*(.-)%s*$") == name then found = true; break end
+        end
+        if not found then
+            targetBox.Text = cur == "" and name or cur .. "," .. name
+        end
+    end
+    plOnRemove = function(name)
+        local parts = {}
+        for v in (targetBox.Text .. ","):gmatch("([^,]*),") do
+            local vt = v:match("^%s*(.-)%s*$")
+            if vt ~= name and vt ~= "" then table.insert(parts, vt) end
+        end
+        targetBox.Text = table.concat(parts, ",")
+    end
+    plGetList = function()
+        local t = {}
+        for _, p in ipairs(findPlayers(targetBox.Text)) do t[p.Name] = true end
+        return t
+    end
+    plRefresh(); plPanel.Visible = true
+end
+
+local function openSinglePanel(title, targetBox)
+    plTitle.Text = title
+    plOnAdd = function(name) targetBox.Text = name end
+    plOnRemove = function(name)
+        if targetBox.Text:match("^%s*(.-)%s*$") == name then targetBox.Text = "" end
+    end
+    plGetList = function()
+        local t = {}
+        local found = findPlayer(targetBox.Text:match("^%s*(.-)%s*$"))
+        if found then t[found.Name] = true end
+        return t
+    end
+    plRefresh(); plPanel.Visible = true
+end
+
+local function openListPanel(title, listTable, onAddExtra, onRemoveExtra)
+    plTitle.Text = title
+    plOnAdd = function(name)
+        listTable[name] = true
+        if onAddExtra then onAddExtra() end
+        plRefresh()
+    end
+    plOnRemove = function(name)
+        listTable[name] = nil
+        if onRemoveExtra then onRemoveExtra() end
+        plRefresh()
+    end
+    plGetList = function() return listTable end
+    plRefresh(); plPanel.Visible = true
+end
+
+local plDrag, plDragStart, plDragPos
+plPanel.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+        plDrag = true; plDragStart = inp.Position; plDragPos = plPanel.Position
+        inp.Changed:Connect(function()
+            if inp.UserInputState == Enum.UserInputState.End then plDrag = false end
+        end)
+    end
+end)
+UIS.InputChanged:Connect(function(inp)
+    if plDrag and inp.UserInputType == Enum.UserInputType.MouseMovement then
+        local d = inp.Position - plDragStart
+        plPanel.Position = UDim2.new(plDragPos.X.Scale, plDragPos.X.Offset + d.X, plDragPos.Y.Scale, plDragPos.Y.Offset + d.Y)
+    end
+end)
+local killWhitelist={}; local killStatusLabel=nil
+local function updateKillStatus()
+    local count=0; for _ in pairs(watchList) do count=count+1 end
+    if killStatusLabel then killStatusLabel.Text="Watch list: "..count.." target(s)" end
+end
+
+local KillAllButton, kb_killall = addBtn("Kill All: OFF")
+local killWhitelistBox
+do
+    local posY=pageY[buildPage]
+    killWhitelistBox=Instance.new("TextBox",pages[buildPage])
+    killWhitelistBox.PlaceholderText="type target"
+    killWhitelistBox.Text=""; killWhitelistBox.Size=UDim2.new(0,172,0,BOX_H); killWhitelistBox.Position=UDim2.new(0,10,0,posY)
+    killWhitelistBox.BackgroundColor3=Color3.fromRGB(40,40,40); killWhitelistBox.TextColor3=Color3.fromRGB(255,255,255)
+    killWhitelistBox.PlaceholderColor3=Color3.fromRGB(130,130,130); killWhitelistBox.Font=Enum.Font.SourceSans
+    killWhitelistBox.TextSize=13; killWhitelistBox.ClearTextOnFocus=false; killWhitelistBox.BorderSizePixel=0
+    Instance.new("UICorner",killWhitelistBox).CornerRadius=UDim.new(0,6)
+    local kwb=Instance.new("TextButton",pages[buildPage])
+    kwb.Text="="; kwb.Size=UDim2.new(0,24,0,BOX_H); kwb.Position=UDim2.new(0,186,0,posY)
+    kwb.BackgroundColor3=Color3.fromRGB(60,60,60); kwb.TextColor3=Color3.fromRGB(255,255,255)
+    kwb.Font=Enum.Font.SourceSansBold; kwb.TextSize=14; kwb.BorderSizePixel=0
+    Instance.new("UICorner",kwb).CornerRadius=UDim.new(0,5)
+    kwb.MouseButton1Click:Connect(function() openListPanel("Kill All Whitelist",killWhitelist,nil,nil) end)
+    pageY[buildPage]=posY+BOX_H+GAP
+    killWhitelistBox.FocusLost:Connect(function(enter)
+        if enter and killWhitelistBox.Text~="" then
+            local inp=killWhitelistBox.Text:match("^%s*(.-)%s*$")
+            if inp~="" then local f=findPlayer(inp); killWhitelist[f and f.Name or inp]=true end
+            killWhitelistBox.Text=""
+        end
+    end)
+end
+local AutoDropToggle,  kb_adrop = addBtn("Auto-Drop: OFF")
+local AutoSwingButton, kb_swing = addBtn("Auto-Swing: OFF")
+local GrabtoolsToggle, kb_grab  = addBtn("Grabtools: OFF")
+local LoopBringButton, kb_bring = addBtn("LoopBring: OFF")
+local BringTargetBox
+do
+    local posY=pageY[buildPage]
+    BringTargetBox=Instance.new("TextBox",pages[buildPage])
+    BringTargetBox.PlaceholderText="type target"
+    BringTargetBox.Text=""; BringTargetBox.Size=UDim2.new(0,172,0,BOX_H)
+    BringTargetBox.Position=UDim2.new(0,10,0,posY)
+    BringTargetBox.BackgroundColor3=Color3.fromRGB(40,40,40); BringTargetBox.TextColor3=Color3.fromRGB(255,255,255)
+    BringTargetBox.PlaceholderColor3=Color3.fromRGB(130,130,130); BringTargetBox.Font=Enum.Font.SourceSans
+    BringTargetBox.TextSize=13; BringTargetBox.ClearTextOnFocus=false; BringTargetBox.BorderSizePixel=0
+    Instance.new("UICorner",BringTargetBox).CornerRadius=UDim.new(0,6)
+    local b=Instance.new("TextButton",pages[buildPage])
+    b.Text="="; b.Size=UDim2.new(0,24,0,BOX_H); b.Position=UDim2.new(0,186,0,posY)
+    b.BackgroundColor3=Color3.fromRGB(60,60,60); b.TextColor3=Color3.fromRGB(255,255,255)
+    b.Font=Enum.Font.SourceSansBold; b.TextSize=14; b.BorderSizePixel=0
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,5)
+    b.MouseButton1Click:Connect(function() openMultiPanel("LoopBring Targets",BringTargetBox) end)
+    pageY[buildPage]=posY+BOX_H+GAP
+end
+
+local NoclipButton,     kb_noclip = addBtn("Noclip: OFF")
+local ToolHitboxButton, kb_toolhb = addBtn("Tool Hitbox: OFF")
+local FlyButton,        kb_fly    = addBtn("Fly: OFF")
+local FlySpeedBox                 = addBox("type speed")
+do
+    if featureCount[buildPage]>=5 then buildPage=buildPage+1 end
+    local posY=pageY[buildPage]
+    local lbl=Instance.new("TextLabel",pages[buildPage])
+    lbl.Text="No Legs:"; lbl.Size=UDim2.new(0,72,0,BTN_H); lbl.Position=UDim2.new(0,10,0,posY)
+    lbl.BackgroundTransparency=1; lbl.TextColor3=Color3.fromRGB(200,200,200)
+    lbl.Font=Enum.Font.SourceSans; lbl.TextSize=14; lbl.TextXAlignment=Enum.TextXAlignment.Left
+    local btnLeft=Instance.new("TextButton",pages[buildPage])
+    btnLeft.Text="Left"; btnLeft.Size=UDim2.new(0,48,0,BTN_H-10); btnLeft.Position=UDim2.new(0,82,0,posY+5)
+    btnLeft.BackgroundColor3=Color3.fromRGB(50,50,50); btnLeft.TextColor3=Color3.fromRGB(255,255,255)
+    btnLeft.Font=Enum.Font.SourceSans; btnLeft.TextSize=13
+    Instance.new("UICorner",btnLeft).CornerRadius=UDim.new(0,8)
+    local btnRight=Instance.new("TextButton",pages[buildPage])
+    btnRight.Text="Right"; btnRight.Size=UDim2.new(0,52,0,BTN_H-10); btnRight.Position=UDim2.new(0,133,0,posY+5)
+    btnRight.BackgroundColor3=Color3.fromRGB(50,50,50); btnRight.TextColor3=Color3.fromRGB(255,255,255)
+    btnRight.Font=Enum.Font.SourceSans; btnRight.TextSize=13
+    Instance.new("UICorner",btnRight).CornerRadius=UDim.new(0,8)
+    pageY[buildPage]=posY+BTN_H+GAP; featureCount[buildPage]=featureCount[buildPage]+1
+    local LEFT_R6={"Left Leg"}; local RIGHT_R6={"Right Leg"}
+    local LEFT_R15={"LeftUpperLeg","LeftLowerLeg","LeftFoot"}
+    local RIGHT_R15={"RightUpperLeg","RightLowerLeg","RightFoot"}
+    local leftRemoved=false; local rightRemoved=false
+    local function removeLeg(side)
+        local char=player.Character; if not char then return end
+        local names; if char:FindFirstChild("Torso") then names=side=="left" and LEFT_R6 or RIGHT_R6
+        else names=side=="left" and LEFT_R15 or RIGHT_R15 end
+        for _,n in ipairs(names) do local part=char:FindFirstChild(n); if part then part:Destroy() end end
+    end
+    local function updateLegBtns()
+        btnLeft.Text=leftRemoved and "[ON] Left" or "Left"
+        btnRight.Text=rightRemoved and "[ON] Right" or "Right"
+        btnLeft.BackgroundColor3=leftRemoved and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+        btnRight.BackgroundColor3=rightRemoved and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+    end
+    btnLeft.MouseButton1Click:Connect(function()
+        leftRemoved=not leftRemoved
+        if leftRemoved then removeLeg("left") else player:LoadCharacter() end; updateLegBtns()
+    end)
+    btnRight.MouseButton1Click:Connect(function()
+        rightRemoved=not rightRemoved
+        if rightRemoved then removeLeg("right") else player:LoadCharacter() end; updateLegBtns()
+    end)
+    player.CharacterAdded:Connect(function() leftRemoved=false; rightRemoved=false; updateLegBtns() end)
+end
+local WalkFlingButton, kb_walkfling = addBtn("WalkFling: OFF")
+
+local HeadlessButton, kb_headless = addBtn("Headless (Visual): OFF")
+local IYButton,       kb_iy       = addBtn("Infinite Yield")
+local StareButton,    kb_stare    = addBtn("Stare: OFF")
+local StareTargetBox
+do
+    local posY=pageY[buildPage]
+    StareTargetBox=Instance.new("TextBox",pages[buildPage])
+    StareTargetBox.PlaceholderText="type target"
+    StareTargetBox.Text=""; StareTargetBox.Size=UDim2.new(0,172,0,BOX_H)
+    StareTargetBox.Position=UDim2.new(0,10,0,posY)
+    StareTargetBox.BackgroundColor3=Color3.fromRGB(40,40,40); StareTargetBox.TextColor3=Color3.fromRGB(255,255,255)
+    StareTargetBox.PlaceholderColor3=Color3.fromRGB(130,130,130); StareTargetBox.Font=Enum.Font.SourceSans
+    StareTargetBox.TextSize=13; StareTargetBox.ClearTextOnFocus=false; StareTargetBox.BorderSizePixel=0
+    Instance.new("UICorner",StareTargetBox).CornerRadius=UDim.new(0,6)
+    local b=Instance.new("TextButton",pages[buildPage])
+    b.Text="="; b.Size=UDim2.new(0,24,0,BOX_H); b.Position=UDim2.new(0,186,0,posY)
+    b.BackgroundColor3=Color3.fromRGB(60,60,60); b.TextColor3=Color3.fromRGB(255,255,255)
+    b.Font=Enum.Font.SourceSansBold; b.TextSize=14; b.BorderSizePixel=0
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,5)
+    b.MouseButton1Click:Connect(function() openSinglePanel("Stare Target",StareTargetBox) end)
+    pageY[buildPage]=posY+BOX_H+GAP
+end
+local ViewButton,  kb_spec = addBtn("Spectate: OFF")
+local ViewTextBox
+do
+    local posY=pageY[buildPage]
+    ViewTextBox=Instance.new("TextBox",pages[buildPage])
+    ViewTextBox.PlaceholderText="type target"
+    ViewTextBox.Text=""; ViewTextBox.Size=UDim2.new(0,172,0,BOX_H)
+    ViewTextBox.Position=UDim2.new(0,10,0,posY)
+    ViewTextBox.BackgroundColor3=Color3.fromRGB(40,40,40); ViewTextBox.TextColor3=Color3.fromRGB(255,255,255)
+    ViewTextBox.PlaceholderColor3=Color3.fromRGB(130,130,130); ViewTextBox.Font=Enum.Font.SourceSans
+    ViewTextBox.TextSize=13; ViewTextBox.ClearTextOnFocus=false; ViewTextBox.BorderSizePixel=0
+    Instance.new("UICorner",ViewTextBox).CornerRadius=UDim.new(0,6)
+    local b=Instance.new("TextButton",pages[buildPage])
+    b.Text="="; b.Size=UDim2.new(0,24,0,BOX_H); b.Position=UDim2.new(0,186,0,posY)
+    b.BackgroundColor3=Color3.fromRGB(60,60,60); b.TextColor3=Color3.fromRGB(255,255,255)
+    b.Font=Enum.Font.SourceSansBold; b.TextSize=14; b.BorderSizePixel=0
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,5)
+    b.MouseButton1Click:Connect(function() openSinglePanel("Spectate Target",ViewTextBox) end)
+    pageY[buildPage]=posY+BOX_H+GAP
+end
+
+local TeleportButton, kb_tp = addBtn("Teleport to Player")
+local TeleportTextBox
+do
+    local posY=pageY[buildPage]
+    TeleportTextBox=Instance.new("TextBox",pages[buildPage])
+    TeleportTextBox.PlaceholderText="type target"
+    TeleportTextBox.Text=""; TeleportTextBox.Size=UDim2.new(0,172,0,BOX_H)
+    TeleportTextBox.Position=UDim2.new(0,10,0,posY)
+    TeleportTextBox.BackgroundColor3=Color3.fromRGB(40,40,40); TeleportTextBox.TextColor3=Color3.fromRGB(255,255,255)
+    TeleportTextBox.PlaceholderColor3=Color3.fromRGB(130,130,130); TeleportTextBox.Font=Enum.Font.SourceSans
+    TeleportTextBox.TextSize=13; TeleportTextBox.ClearTextOnFocus=false; TeleportTextBox.BorderSizePixel=0
+    Instance.new("UICorner",TeleportTextBox).CornerRadius=UDim.new(0,6)
+    local b=Instance.new("TextButton",pages[buildPage])
+    b.Text="="; b.Size=UDim2.new(0,24,0,BOX_H); b.Position=UDim2.new(0,186,0,posY)
+    b.BackgroundColor3=Color3.fromRGB(60,60,60); b.TextColor3=Color3.fromRGB(255,255,255)
+    b.Font=Enum.Font.SourceSansBold; b.TextSize=14; b.BorderSizePixel=0
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,5)
+    b.MouseButton1Click:Connect(function() openSinglePanel("Teleport Target",TeleportTextBox) end)
+    pageY[buildPage]=posY+BOX_H+GAP
+end
+local EspButton,    kb_esp    = addBtn("ESP: OFF")
+local LocateButton, kb_locate = addBtn("Locate: OFF")
+local LocateTextBox
+do
+    local posY=pageY[buildPage]
+    LocateTextBox=Instance.new("TextBox",pages[buildPage])
+    LocateTextBox.PlaceholderText="type target"
+    LocateTextBox.Text=""; LocateTextBox.Size=UDim2.new(0,172,0,BOX_H)
+    LocateTextBox.Position=UDim2.new(0,10,0,posY)
+    LocateTextBox.BackgroundColor3=Color3.fromRGB(40,40,40); LocateTextBox.TextColor3=Color3.fromRGB(255,255,255)
+    LocateTextBox.PlaceholderColor3=Color3.fromRGB(130,130,130); LocateTextBox.Font=Enum.Font.SourceSans
+    LocateTextBox.TextSize=13; LocateTextBox.ClearTextOnFocus=false; LocateTextBox.BorderSizePixel=0
+    Instance.new("UICorner",LocateTextBox).CornerRadius=UDim.new(0,6)
+    local b=Instance.new("TextButton",pages[buildPage])
+    b.Text="="; b.Size=UDim2.new(0,24,0,BOX_H); b.Position=UDim2.new(0,186,0,posY)
+    b.BackgroundColor3=Color3.fromRGB(60,60,60); b.TextColor3=Color3.fromRGB(255,255,255)
+    b.Font=Enum.Font.SourceSansBold; b.TextSize=14; b.BorderSizePixel=0
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,5)
+    b.MouseButton1Click:Connect(function() openMultiPanel("Locate Targets",LocateTextBox) end)
+    pageY[buildPage]=posY+BOX_H+GAP
+end
+local KillNotifButton, kb_kill = addBtn("Kill Notif: OFF")
+local killWatchBox
+do
+    local posY=pageY[buildPage]
+    killWatchBox=Instance.new("TextBox",pages[buildPage])
+    killWatchBox.PlaceholderText="type target"
+    killWatchBox.Text=""; killWatchBox.Size=UDim2.new(0,172,0,BOX_H); killWatchBox.Position=UDim2.new(0,10,0,posY)
+    killWatchBox.BackgroundColor3=Color3.fromRGB(40,40,40); killWatchBox.TextColor3=Color3.fromRGB(255,255,255)
+    killWatchBox.PlaceholderColor3=Color3.fromRGB(130,130,130); killWatchBox.Font=Enum.Font.SourceSans
+    killWatchBox.TextSize=13; killWatchBox.ClearTextOnFocus=false; killWatchBox.BorderSizePixel=0
+    Instance.new("UICorner",killWatchBox).CornerRadius=UDim.new(0,6)
+    local kwb=Instance.new("TextButton",pages[buildPage])
+    kwb.Text="="; kwb.Size=UDim2.new(0,24,0,BOX_H); kwb.Position=UDim2.new(0,186,0,posY)
+    kwb.BackgroundColor3=Color3.fromRGB(60,60,60); kwb.TextColor3=Color3.fromRGB(255,255,255)
+    kwb.Font=Enum.Font.SourceSansBold; kwb.TextSize=14; kwb.BorderSizePixel=0
+    Instance.new("UICorner",kwb).CornerRadius=UDim.new(0,5)
+    kwb.MouseButton1Click:Connect(function() openListPanel("Kill Notif Watch List",watchList,updateKillStatus,updateKillStatus) end)
+    pageY[buildPage]=posY+BOX_H+GAP
+    killWatchBox.FocusLost:Connect(function(enter)
+        if enter and killWatchBox.Text~="" then
+            local inp=killWatchBox.Text:match("^%s*(.-)%s*$")
+            if inp~="" then local f=findPlayer(inp); watchList[f and f.Name or inp]=true; updateKillStatus() end
+            killWatchBox.Text=""
+        end
+    end)
+end
+killStatusLabel=Instance.new("TextLabel",pages[buildPage])
+killStatusLabel.Size=UDim2.new(0,200,0,18); killStatusLabel.Position=UDim2.new(0,10,0,pageY[buildPage])
+killStatusLabel.BackgroundTransparency=1; killStatusLabel.TextColor3=Color3.fromRGB(160,160,160)
+killStatusLabel.Font=Enum.Font.SourceSans; killStatusLabel.TextSize=12
+killStatusLabel.Text="Watch list: 0 target(s)"; killStatusLabel.TextXAlignment=Enum.TextXAlignment.Left
+pageY[buildPage]=pageY[buildPage]+20+GAP
+
+local TPWalkButton,  kb_tpwalk = addBtn("TPWalk: OFF")
+local TPWalkSpeedBox            = addBox("type speed")
+local RejoinButton,  kb_rejoin = addBtn("Rejoin (same server)")
+
+local TPUnaButton, kb_tpuna = addBtn("TP Unanchored: OFF")
+local TPUnaTargetBox
+do
+    local posY=pageY[buildPage]
+    TPUnaTargetBox=Instance.new("TextBox",pages[buildPage])
+    TPUnaTargetBox.PlaceholderText="type target"
+    TPUnaTargetBox.Text=""; TPUnaTargetBox.Size=UDim2.new(0,172,0,BOX_H)
+    TPUnaTargetBox.Position=UDim2.new(0,10,0,posY)
+    TPUnaTargetBox.BackgroundColor3=Color3.fromRGB(40,40,40); TPUnaTargetBox.TextColor3=Color3.fromRGB(255,255,255)
+    TPUnaTargetBox.PlaceholderColor3=Color3.fromRGB(130,130,130); TPUnaTargetBox.Font=Enum.Font.SourceSans
+    TPUnaTargetBox.TextSize=13; TPUnaTargetBox.ClearTextOnFocus=false; TPUnaTargetBox.BorderSizePixel=0
+    Instance.new("UICorner",TPUnaTargetBox).CornerRadius=UDim.new(0,6)
+    local b=Instance.new("TextButton",pages[buildPage])
+    b.Text="="; b.Size=UDim2.new(0,24,0,BOX_H); b.Position=UDim2.new(0,186,0,posY)
+    b.BackgroundColor3=Color3.fromRGB(60,60,60); b.TextColor3=Color3.fromRGB(255,255,255)
+    b.Font=Enum.Font.SourceSansBold; b.TextSize=14; b.BorderSizePixel=0
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,5)
+    b.MouseButton1Click:Connect(function() openSinglePanel("TP Unanchored Target",TPUnaTargetBox) end)
+    pageY[buildPage]=posY+BOX_H+GAP
+end
+
+local DeadSpawnButton, kb_deadspawn = addBtn("Dead Spawn: OFF")
+
+for i=buildPage+1,totalPages do
+    local lbl=Instance.new("TextLabel",pages[i])
+    lbl.Text="Page "..i.." - coming soon"
+    lbl.Size=UDim2.new(0,200,0,40); lbl.Position=UDim2.new(0,10,0,10)
+    lbl.BackgroundTransparency=1; lbl.TextColor3=Color3.fromRGB(100,100,100)
+    lbl.Font=Enum.Font.SourceSansItalic; lbl.TextSize=15
+end
+
+kb_adrop.Text="F"; kb_swing.Text="Q"; kb_grab.Text="E"; kb_bring.Text="V"
+
+local NavFrame=Instance.new("Frame",MainFrame)
+NavFrame.BackgroundTransparency=1; NavFrame.Size=UDim2.new(0,FRAME_W,0,45)
+NavFrame.Position=UDim2.new(0,0,0,FRAME_H_OPEN-45); NavFrame.ZIndex=10
+local PrevBtn=Instance.new("TextButton",NavFrame)
+PrevBtn.Text="<"; PrevBtn.Size=UDim2.new(0,38,0,34); PrevBtn.Position=UDim2.new(0,6,0,5)
+PrevBtn.BackgroundColor3=Color3.fromRGB(60,60,60); PrevBtn.TextColor3=Color3.fromRGB(255,255,255)
+PrevBtn.Font=Enum.Font.SourceSansBold; PrevBtn.TextSize=16; PrevBtn.ZIndex=10
+Instance.new("UICorner",PrevBtn).CornerRadius=UDim.new(0,8)
+local PageLabel=Instance.new("TextLabel",NavFrame)
+PageLabel.Text="1 / 10"; PageLabel.Size=UDim2.new(0,60,0,34); PageLabel.Position=UDim2.new(0,50,0,5)
+PageLabel.BackgroundTransparency=1; PageLabel.TextColor3=Color3.fromRGB(200,200,200)
+PageLabel.Font=Enum.Font.SourceSansBold; PageLabel.TextSize=15; PageLabel.ZIndex=10
+local NextBtn=Instance.new("TextButton",NavFrame)
+NextBtn.Text=">"; NextBtn.Size=UDim2.new(0,38,0,34); NextBtn.Position=UDim2.new(0,116,0,5)
+NextBtn.BackgroundColor3=Color3.fromRGB(60,60,60); NextBtn.TextColor3=Color3.fromRGB(255,255,255)
+NextBtn.Font=Enum.Font.SourceSansBold; NextBtn.TextSize=16; NextBtn.ZIndex=10
+Instance.new("UICorner",NextBtn).CornerRadius=UDim.new(0,8)
+local GoToBox=Instance.new("TextBox",NavFrame)
+GoToBox.PlaceholderText="Go to page..."; GoToBox.Text=""
+GoToBox.Size=UDim2.new(0,62,0,34); GoToBox.Position=UDim2.new(0,158,0,5)
+GoToBox.BackgroundColor3=Color3.fromRGB(40,40,40); GoToBox.TextColor3=Color3.fromRGB(255,255,255)
+GoToBox.PlaceholderColor3=Color3.fromRGB(110,110,110); GoToBox.Font=Enum.Font.SourceSans
+GoToBox.TextSize=14; GoToBox.ClearTextOnFocus=false; GoToBox.BorderSizePixel=0; GoToBox.ZIndex=10
+Instance.new("UICorner",GoToBox).CornerRadius=UDim.new(0,8)
+
+local currentPage=1
+local function goToPage(pageNum)
+    pageNum=math.clamp(pageNum,1,totalPages); currentPage=pageNum
+    PageLabel.Text=currentPage.." / "..totalPages
+    TweenService:Create(PageContainer,TweenInfo.new(0.2,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),
+        {Position=UDim2.new(0,-(currentPage-1)*FRAME_W,0,35)}):Play()
+end
+PrevBtn.MouseButton1Click:Connect(function() goToPage(currentPage-1) end)
+NextBtn.MouseButton1Click:Connect(function() goToPage(currentPage+1) end)
+GoToBox.FocusLost:Connect(function(e)
+    if e then local n=tonumber(GoToBox.Text); if n then goToPage(n) end; GoToBox.Text="" end
+end)
+
+local guiVisible=true
+local function setGuiVisible(v)
+    guiVisible=v; MainFrame.Visible=v
+    if not v then plPanel.Visible=false end
+end
+
+local isMinimized=false
+local function setMinimize(m)
+    isMinimized=m
+    TweenService:Create(MainFrame,TweenInfo.new(0.3,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),
+        {Size=UDim2.new(0,FRAME_W,0,m and FRAME_H_CLOSED or FRAME_H_OPEN)}):Play()
+    MinimizeButton.Text=m and "+" or "-"
+end
+MinimizeButton.MouseButton1Click:Connect(function() setMinimize(not isMinimized) end)
+
+local killAllEnabled=false; local killAllQueue={}; local killAllActive={}
+local function isAlive(p)
+    return p and p.Character and p.Character:FindFirstChildOfClass("Humanoid")
+        and p.Character:FindFirstChildOfClass("Humanoid").Health>0
+end
+local function buildKillAllQueue()
+    local all={}
+    for _,p in ipairs(Players:GetPlayers()) do
+        if p~=player and isAlive(p) and not killWhitelist[p.Name] then table.insert(all,p) end
+    end
+    return all
+end
+local function toggleKillAll()
+    killAllEnabled=not killAllEnabled
+    KillAllButton.Text=killAllEnabled and "Kill All: ON" or "Kill All: OFF"
+    KillAllButton.BackgroundColor3=killAllEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+    if killAllEnabled then killAllQueue=buildKillAllQueue(); killAllActive={}
+    else killAllQueue={}; killAllActive={} end
+end
+
+local autoDropEnabled=false
+local function toggleAutoDrop()
+    autoDropEnabled=not autoDropEnabled
+    AutoDropToggle.Text=autoDropEnabled and "Auto-Drop: ON" or "Auto-Drop: OFF"
+    AutoDropToggle.BackgroundColor3=autoDropEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+end
+
+local autoSwingEnabled=false
+local function toggleAutoSwing()
+    autoSwingEnabled=not autoSwingEnabled
+    AutoSwingButton.Text=autoSwingEnabled and "Auto-Swing: ON" or "Auto-Swing: OFF"
+    AutoSwingButton.BackgroundColor3=autoSwingEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+end
+
+local function toggleGrabtools()
+    if grabtoolsEnabled then stopGrabTools(GrabtoolsToggle) else startGrabTools(GrabtoolsToggle) end
+end
+
+local loopBringEnabled=false
+local function toggleLoopBring()
+    loopBringEnabled=not loopBringEnabled
+    LoopBringButton.Text=loopBringEnabled and "LoopBring: ON" or "LoopBring: OFF"
+    LoopBringButton.BackgroundColor3=loopBringEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+end
+
+local noclipEnabled=false; local noclipConn=nil
+local function toggleNoclip()
+    noclipEnabled=not noclipEnabled
+    NoclipButton.Text=noclipEnabled and "Noclip: ON" or "Noclip: OFF"
+    NoclipButton.BackgroundColor3=noclipEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+    if noclipEnabled then
+        noclipConn=RunService.Stepped:Connect(function()
+            local char=player.Character
+            if char then for _,part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then part.CanCollide=false end end end
+        end)
+    else
+        if noclipConn then noclipConn:Disconnect() noclipConn=nil end
+        local char=player.Character
+        if char then for _,part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then part.CanCollide=true end end end
+    end
+end
+
+local function toggleToolHitbox()
+    toolHitboxEnabled=not toolHitboxEnabled
+    ToolHitboxButton.Text=toolHitboxEnabled and "Tool Hitbox: ON" or "Tool Hitbox: OFF"
+    ToolHitboxButton.BackgroundColor3=toolHitboxEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+    if not toolHitboxEnabled then clearAllToolHitboxes() end
+end
+
+local flyEnabled=false; local flyConn=nil; local flyBody={}
+local function cleanFly()
+    for _,obj in ipairs(flyBody) do pcall(function() obj:Destroy() end) end; flyBody={}
+end
+local function toggleFly()
+    flyEnabled=not flyEnabled
+    FlyButton.Text=flyEnabled and "Fly: ON" or "Fly: OFF"
+    FlyButton.BackgroundColor3=flyEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+    if flyEnabled then
+        local char=player.Character; if not char then flyEnabled=false return end
+        local root=char:FindFirstChild("HumanoidRootPart"); if not root then flyEnabled=false return end
+        local hum=char:FindFirstChildOfClass("Humanoid"); if not hum then flyEnabled=false return end
+        hum.PlatformStand=true
+        local bv=Instance.new("BodyVelocity",root)
+        bv.Velocity=Vector3.zero; bv.MaxForce=Vector3.new(1e5,1e5,1e5); table.insert(flyBody,bv)
+        local bg=Instance.new("BodyGyro",root)
+        bg.MaxTorque=Vector3.new(1e5,1e5,1e5); bg.P=1e4; table.insert(flyBody,bg)
+        flyConn=RunService.Heartbeat:Connect(function()
+            local ch=player.Character; if not ch then return end
+            local rt=ch:FindFirstChild("HumanoidRootPart"); if not rt then return end
+            local speed=tonumber(FlySpeedBox.Text) or 50
+            local cf=camera.CFrame; local move=Vector3.zero
+            if UIS:IsKeyDown(Enum.KeyCode.W) then move=move+cf.LookVector end
+            if UIS:IsKeyDown(Enum.KeyCode.S) then move=move-cf.LookVector end
+            if UIS:IsKeyDown(Enum.KeyCode.A) then move=move-cf.RightVector end
+            if UIS:IsKeyDown(Enum.KeyCode.D) then move=move+cf.RightVector end
+            if UIS:IsKeyDown(Enum.KeyCode.Space) then move=move+Vector3.new(0,1,0) end
+            if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then move=move-Vector3.new(0,1,0) end
+            bv.Velocity=move.Magnitude>0 and move.Unit*speed or Vector3.zero; bg.CFrame=cf
+        end)
+    else
+        if flyConn then flyConn:Disconnect() flyConn=nil end; cleanFly()
+        local char=player.Character
+        if char then local hum=char:FindFirstChildOfClass("Humanoid"); if hum then hum.PlatformStand=false end end
+    end
+end
+
+local function toggleWalkFling()
+    touchFlingEnabled=not touchFlingEnabled
+    WalkFlingButton.Text=touchFlingEnabled and "WalkFling: ON" or "WalkFling: OFF"
+    WalkFlingButton.BackgroundColor3=touchFlingEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+    if touchFlingEnabled then setupTouchFling()
+    else if touchFlingConn then touchFlingConn:Disconnect() touchFlingConn=nil end end
+end
+
+local headlessEnabled=false
+local function applyHeadless(char)
+    if not char then return end
+    local head=char:FindFirstChild("Head"); if not head then return end
+    head.Transparency=1
+    for _,c in ipairs(head:GetChildren()) do
+        if c:IsA("Decal") then c.Transparency=1 end
+        if c:IsA("SpecialMesh") then c.Scale=Vector3.new(0,0,0) end
+    end
+end
+local function restoreHeadless(char)
+    if not char then return end
+    local head=char:FindFirstChild("Head"); if not head then return end
+    head.Transparency=0
+    for _,c in ipairs(head:GetChildren()) do
+        if c:IsA("Decal") then c.Transparency=0 end
+        if c:IsA("SpecialMesh") then c.Scale=Vector3.new(1,1,1) end
+    end
+end
+local function toggleHeadless()
+    headlessEnabled=not headlessEnabled
+    HeadlessButton.Text=headlessEnabled and "Headless (Visual): ON" or "Headless (Visual): OFF"
+    HeadlessButton.BackgroundColor3=headlessEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+    local char=player.Character
+    if headlessEnabled then applyHeadless(char) else restoreHeadless(char) end
+end
+
+local function doIY()
+    IYButton.Text="Loading..."
+    IYButton.BackgroundColor3=Color3.fromRGB(100,100,0)
+    task.spawn(function()
+        pcall(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+        end)
+        task.wait(2)
+        if IYButton and IYButton.Parent then
+            IYButton.Text="Infinite Yield"
+            IYButton.BackgroundColor3=Color3.fromRGB(50,50,50)
+        end
+    end)
+end
+
+local stareEnabled=false
+local function toggleStare()
+    stareEnabled=not stareEnabled
+    StareButton.Text=stareEnabled and "Stare: ON" or "Stare: OFF"
+    StareButton.BackgroundColor3=stareEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+    if stareEnabled then createStareLine() else destroyStareLine() end
+end
+
+local espEnabled=false
+local function toggleESP()
+    espEnabled=not espEnabled
+    if espEnabled then
+        EspButton.Text="ESP: ON"; EspButton.BackgroundColor3=Color3.fromRGB(0,150,0)
+        for _,p in ipairs(Players:GetPlayers()) do addESPFor(p) end
+    else
+        EspButton.Text="ESP: OFF"; EspButton.BackgroundColor3=Color3.fromRGB(50,50,50)
+        for p in pairs(espData) do removeESPFor(p) end
+    end
+end
+
+local locateEnabled=false
+local function toggleLocate()
+    locateEnabled=not locateEnabled
+    if locateEnabled then
+        LocateButton.Text="Locate: ON"; LocateButton.BackgroundColor3=Color3.fromRGB(0,150,0)
+        for _,t in ipairs(findPlayers(LocateTextBox.Text)) do addLocateFor(t) end
+    else
+        LocateButton.Text="Locate: OFF"; LocateButton.BackgroundColor3=Color3.fromRGB(50,50,50)
+        for p in pairs(locateData) do removeLocateFor(p) end
+    end
+end
+
+local function toggleKillNotif()
+    killNotifEnabled=not killNotifEnabled
+    KillNotifButton.Text=killNotifEnabled and "Kill Notif: ON" or "Kill Notif: OFF"
+    KillNotifButton.BackgroundColor3=killNotifEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+end
+
+local tpwalkEnabled=false; local tpwalkConn=nil
+local function toggleTPWalk()
+    tpwalkEnabled=not tpwalkEnabled
+    TPWalkButton.Text=tpwalkEnabled and "TPWalk: ON" or "TPWalk: OFF"
+    TPWalkButton.BackgroundColor3=tpwalkEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+    if tpwalkEnabled then
+        tpwalkConn=RunService.Heartbeat:Connect(function()
+            local ch=player.Character; if not ch then return end
+            local rt=ch:FindFirstChild("HumanoidRootPart"); if not rt then return end
+            local hum=ch:FindFirstChildOfClass("Humanoid"); if not hum then return end
+            local speed=tonumber(TPWalkSpeedBox.Text) or 16
+            local cf=camera.CFrame
+            local move=Vector3.new(0,0,0)
+            if UIS:IsKeyDown(Enum.KeyCode.W) then move=move+Vector3.new(cf.LookVector.X,0,cf.LookVector.Z).Unit end
+            if UIS:IsKeyDown(Enum.KeyCode.S) then move=move-Vector3.new(cf.LookVector.X,0,cf.LookVector.Z).Unit end
+            if UIS:IsKeyDown(Enum.KeyCode.A) then move=move-Vector3.new(cf.RightVector.X,0,cf.RightVector.Z).Unit end
+            if UIS:IsKeyDown(Enum.KeyCode.D) then move=move+Vector3.new(cf.RightVector.X,0,cf.RightVector.Z).Unit end
+            if move.Magnitude<0.1 then return end
+            local newPos=rt.Position+move.Unit*speed*0.1
+            pcall(function()
+                rt.CFrame=CFrame.new(newPos)*CFrame.Angles(0,math.atan2(move.X,move.Z)+math.pi,0)
+            end)
+        end)
+    else
+        if tpwalkConn then tpwalkConn:Disconnect() tpwalkConn=nil end
+    end
+end
+
+local SELF_SCRIPT_URL="https://pastebin.com/raw/GG6XDaYu"
+
+local tpunaEnabled = false; local tpunaConn = nil
+local function toggleTPUna()
+    tpunaEnabled = not tpunaEnabled
+    TPUnaButton.Text = tpunaEnabled and "TP Unanchored: ON" or "TP Unanchored: OFF"
+    TPUnaButton.BackgroundColor3 = tpunaEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+    if tpunaEnabled then
+        task.spawn(function()
+            local fti = firetouchinterest or (getgenv and getgenv().firetouchinterest)
+            while tpunaEnabled do
+                local ch = player.Character
+                local myRoot = ch and ch:FindFirstChild("HumanoidRootPart")
+                if myRoot then
+                    local inp = TPUnaTargetBox.Text:match("^%s*(.-)%s*$")
+                    if inp == "" and not grabtoolsEnabled then
+                        local tools = {}
+                        for _, obj in ipairs(workspace:GetChildren()) do
+                            if obj:IsA("Tool") then
+                                local handle = obj:FindFirstChild("Handle")
+                                if handle then table.insert(tools, handle) end
+                            end
+                        end
+                        local count = #tools
+                        for i, handle in ipairs(tools) do
+                            pcall(function()
+                                local angle = (2 * math.pi / math.max(count, 1)) * (i - 1)
+                                local offset = Vector3.new(math.cos(angle) * 10, 0, math.sin(angle) * 10)
+                                handle.CFrame = CFrame.new(myRoot.Position + offset)
+                                if fti then
+                                    fti(handle, myRoot, 0)
+                                    fti(handle, myRoot, 1)
+                                end
+                            end)
+                        end
+                    else
+                        local t = findPlayer(inp)
+                        if t and t.Character then
+                            local tr = t.Character:FindFirstChild("HumanoidRootPart")
+                            if tr then
+                                for _, obj in ipairs(workspace:GetChildren()) do
+                                    if obj:IsA("Tool") then
+                                        pcall(function()
+                                            local handle = obj:FindFirstChild("Handle")
+                                            if not handle then return end
+                                            handle.CFrame = tr.CFrame
+                                            if fti then
+                                                fti(handle, tr, 0)
+                                                fti(handle, tr, 1)
+                                            end
+                                        end)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+                task.wait(0.001)
+            end
+            for _, obj in ipairs(workspace:GetChildren()) do
+                if obj:IsA("Tool") then
+                    pcall(function()
+                        local handle = obj:FindFirstChild("Handle")
+                        if handle then
+                            local bp = handle:FindFirstChildOfClass("BodyPosition")
+                            if bp then bp:Destroy() end
+                            local bg = handle:FindFirstChildOfClass("BodyGyro")
+                            if bg then bg:Destroy() end
+                        end
+                    end)
+                end
+            end
+        end)
+    else
+
+    end
+end
+
+local deadSpawnEnabled = false
+local lastDeadCFrame = nil
+local deadSpawnDiedConn = nil
+local deadSpawnSpawnConn = nil
+
+local function hookDeadSpawnDied(char)
+    if deadSpawnDiedConn then deadSpawnDiedConn:Disconnect() deadSpawnDiedConn = nil end
+    local hum = char:WaitForChild("Humanoid", 5)
+    if not hum then return end
+    deadSpawnDiedConn = hum.Died:Connect(function()
+        if not deadSpawnEnabled then return end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if root then
+            lastDeadCFrame = root.CFrame
+        end
+    end)
+end
+
+local function toggleDeadSpawn()
+    deadSpawnEnabled = not deadSpawnEnabled
+    DeadSpawnButton.Text = deadSpawnEnabled and "Dead Spawn: ON" or "Dead Spawn: OFF"
+    DeadSpawnButton.BackgroundColor3 = deadSpawnEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
+    if deadSpawnEnabled then
+        if player.Character then hookDeadSpawnDied(player.Character) end
+        if deadSpawnSpawnConn then deadSpawnSpawnConn:Disconnect() deadSpawnSpawnConn = nil end
+        deadSpawnSpawnConn = player.CharacterAdded:Connect(function(newChar)
+            if not deadSpawnEnabled then return end
+            hookDeadSpawnDied(newChar)
+            if lastDeadCFrame then
+                local savedCF = lastDeadCFrame
+                task.wait(1)
+                if not deadSpawnEnabled then return end
+                local root = newChar:FindFirstChild("HumanoidRootPart")
+                if root then
+                    pcall(function() root.CFrame = savedCF end)
+                end
+            end
+        end)
+    else
+        if deadSpawnDiedConn then deadSpawnDiedConn:Disconnect() deadSpawnDiedConn = nil end
+        if deadSpawnSpawnConn then deadSpawnSpawnConn:Disconnect() deadSpawnSpawnConn = nil end
+        lastDeadCFrame = nil
+    end
+end
+
+local function doRejoin()
+    RejoinButton.Text="Rejoining..."
+    RejoinButton.BackgroundColor3=Color3.fromRGB(150,100,0)
+    pcall(function()
+        local queueFunc=(syn and syn.queue_on_teleport)
+            or (fluxus and fluxus.queue_on_teleport)
+            or queue_on_teleport
+            or (getgenv and getgenv().queue_on_teleport)
+        if queueFunc then
+            pcall(function()
+                queueFunc('task.wait(3) loadstring(game:HttpGet("'..SELF_SCRIPT_URL..'"))()')
+            end)
+        end
+        local ts=game:GetService("TeleportService")
+        local ok=pcall(function() ts:TeleportToPlaceInstance(game.PlaceId,game.JobId,player) end)
+        if not ok then pcall(function() ts:Teleport(game.PlaceId,player) end) end
+    end)
+end
+
+local spectateEnabled=false; local spectateConnection=nil
+local function stopSpectate()
+    spectateEnabled=false
+    if spectateConnection then spectateConnection:Disconnect() spectateConnection=nil end
+    pcall(function()
+        local myChar=player.Character
+        if myChar then camera.CameraSubject=myChar:FindFirstChildOfClass("Humanoid") end
+        camera.CameraType=Enum.CameraType.Custom
+    end)
+    ViewButton.Text="Spectate: OFF"; ViewButton.BackgroundColor3=Color3.fromRGB(50,50,50)
+end
+local function toggleSpectate()
+    if spectateEnabled then stopSpectate() return end
+    local target=findPlayer(ViewTextBox.Text)
+    if not target then
+        ViewButton.Text="Not found!"
+        task.delay(1.5,function() if not spectateEnabled then ViewButton.Text="Spectate: OFF" end end)
+        return
+    end
+    spectateEnabled=true
+    ViewButton.Text="Spectating: "..target.DisplayName
+    ViewButton.BackgroundColor3=Color3.fromRGB(0,150,0)
+    pcall(function()
+        local tc=target.Character or target.CharacterAdded:Wait()
+        local th=tc:WaitForChild("Humanoid",5)
+        if th then camera.CameraType=Enum.CameraType.Custom; camera.CameraSubject=th end
+    end)
+    spectateConnection=target.CharacterRemoving:Connect(function() stopSpectate() end)
+end
+
+local function doTeleport()
+    local target=findPlayer(TeleportTextBox.Text)
+    if not target then
+        TeleportButton.Text="Not found!"
+        task.delay(1.5,function() TeleportButton.Text="Teleport to Player" end)
+        return
+    end
+    local myChar=player.Character; if not myChar then return end
+    local tc=target.Character; if not tc then return end
+    local myRoot=myChar:FindFirstChild("HumanoidRootPart")
+    local tRoot=tc:FindFirstChild("HumanoidRootPart")
+    if myRoot and tRoot then
+        pcall(function() myRoot.CFrame=tRoot.CFrame*CFrame.new(0,0,3) end)
+        TeleportButton.Text="TP to "..target.DisplayName.."!"
+        task.delay(1.5,function() TeleportButton.Text="Teleport to Player" end)
+    end
+end
+
+player.CharacterAdded:Connect(function(newChar)
+    if flyEnabled then
+        flyEnabled=false; FlyButton.Text="Fly: OFF"; FlyButton.BackgroundColor3=Color3.fromRGB(50,50,50)
+        if flyConn then flyConn:Disconnect() flyConn=nil end; cleanFly()
+    end
+    if tpwalkEnabled then
+        if tpwalkConn then tpwalkConn:Disconnect() tpwalkConn=nil end
+        task.wait(0.5); toggleTPWalk()
+    end
+    if stareEnabled then task.wait(0.5); createStareLine() end
+    if touchFlingEnabled then task.wait(0.5); setupTouchFling() end
+    task.wait(0.5)
+    if headlessEnabled then applyHeadless(newChar) end
+end)
+
+KillAllButton.MouseButton1Click:Connect(toggleKillAll)
+AutoDropToggle.MouseButton1Click:Connect(toggleAutoDrop)
+AutoSwingButton.MouseButton1Click:Connect(toggleAutoSwing)
+GrabtoolsToggle.MouseButton1Click:Connect(toggleGrabtools)
+LoopBringButton.MouseButton1Click:Connect(toggleLoopBring)
+NoclipButton.MouseButton1Click:Connect(toggleNoclip)
+ToolHitboxButton.MouseButton1Click:Connect(toggleToolHitbox)
+FlyButton.MouseButton1Click:Connect(toggleFly)
+WalkFlingButton.MouseButton1Click:Connect(toggleWalkFling)
+HeadlessButton.MouseButton1Click:Connect(toggleHeadless)
+IYButton.MouseButton1Click:Connect(doIY)
+StareButton.MouseButton1Click:Connect(toggleStare)
+ViewButton.MouseButton1Click:Connect(toggleSpectate)
+TeleportButton.MouseButton1Click:Connect(doTeleport)
+EspButton.MouseButton1Click:Connect(toggleESP)
+LocateButton.MouseButton1Click:Connect(toggleLocate)
+KillNotifButton.MouseButton1Click:Connect(toggleKillNotif)
+TPWalkButton.MouseButton1Click:Connect(toggleTPWalk)
+RejoinButton.MouseButton1Click:Connect(doRejoin)
+TPUnaButton.MouseButton1Click:Connect(toggleTPUna)
+DeadSpawnButton.MouseButton1Click:Connect(toggleDeadSpawn)
+
+keyPairList={
+    {kb_killall,toggleKillAll},{kb_adrop,toggleAutoDrop},
+    {kb_swing,toggleAutoSwing},{kb_grab,toggleGrabtools},
+    {kb_bring,toggleLoopBring},{kb_noclip,toggleNoclip},
+    {kb_toolhb,toggleToolHitbox},{kb_fly,toggleFly},
+    {kb_walkfling,toggleWalkFling},{kb_headless,toggleHeadless},
+    {kb_iy,doIY},{kb_stare,toggleStare},
+    {kb_spec,toggleSpectate},{kb_esp,toggleESP},
+    {kb_locate,toggleLocate},{kb_kill,toggleKillNotif},
+    {kb_tpwalk,toggleTPWalk},{kb_rejoin,doRejoin},{kb_tpuna,toggleTPUna},
+    {kb_deadspawn,toggleDeadSpawn},
+}
+
+UIS.InputBegan:Connect(function(input,gp)
+    if gp then return end
+    if input.UserInputType~=Enum.UserInputType.Keyboard then return end
+    local keyName=input.KeyCode.Name
+    if keyName=="K" then setGuiVisible(not guiVisible) return end
+    if #keyName~=1 then return end
+    local focused=UIS:GetFocusedTextBox(); if focused then return end
+    for _,pair in ipairs(keyPairList) do
+        local kb,fn=pair[1],pair[2]
+        if kb and kb.Text~="" and kb.Text:upper()==keyName:upper() then fn() end
+    end
+end)
+
+local killAllTick=0
+task.spawn(function()
+    while true do task.wait(0.001)
+        if killAllEnabled then
+            killAllTick=killAllTick+1
+            local myChar=player.Character; if not myChar then continue end
+            local myRoot=myChar:FindFirstChild("HumanoidRootPart"); if not myRoot then continue end
+            while #killAllActive<3 and #killAllQueue>0 do
+                local nxt=table.remove(killAllQueue,1)
+                if nxt and isAlive(nxt) then table.insert(killAllActive,nxt) end
+            end
+            if #killAllActive==0 and #killAllQueue==0 then
+                local fresh=buildKillAllQueue(); if #fresh>0 then killAllQueue=fresh end
+            end
+            local yOffset=(killAllTick%2==0) and 1 or 0
+            local newActive={}
+            for _,t in ipairs(killAllActive) do
+                if isAlive(t) then
+                    local tc=t.Character; local tr=tc and tc:FindFirstChild("HumanoidRootPart")
+                    if tr then pcall(function() tr.CFrame=myRoot.CFrame*CFrame.new(1.5,yOffset,-2.5) end) end
+                    table.insert(newActive,t)
+                end
+            end
+            killAllActive=newActive
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do task.wait(0.001)
+        if autoDropEnabled then
+            local bp=player:WaitForChild("Backpack")
+            local ch=player.Character or player.CharacterAdded:Wait()
+            local t=bp:FindFirstChildWhichIsA("Tool"); if t then t.Parent=Workspace end
+            local te=ch:FindFirstChildWhichIsA("Tool"); if te then te.Parent=Workspace end
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do task.wait(0.001)
+        if autoSwingEnabled then
+            local ch=player.Character or player.CharacterAdded:Wait()
+            local et=ch:FindFirstChildWhichIsA("Tool")
+            if et and et.Parent==ch then pcall(function() et:Activate() et:Deactivate() end) end
+        end
+    end
+end)
+
+local loopBringTick=0
+task.spawn(function()
+    while true do task.wait(0.001)
+        if loopBringEnabled then
+            loopBringTick=loopBringTick+1
+            local targets=findPlayers(BringTargetBox.Text)
+            local myChar=player.Character
+            if myChar then
+                local myRoot=myChar:FindFirstChild("HumanoidRootPart")
+                if myRoot then
+                    local yOffset=(loopBringTick%2==0) and 1 or 0
+                    for _,t in ipairs(targets) do
+                        local tc=t.Character
+                        if tc then
+                            local tr=tc:FindFirstChild("HumanoidRootPart")
+                            if tr then pcall(function() tr.CFrame=myRoot.CFrame*CFrame.new(1.5,yOffset,-2.5) end) end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do task.wait(0.05)
+        if toolHitboxEnabled then
+            for _,p in ipairs(Players:GetPlayers()) do updateToolHitboxFor(p) end
+            for p,_ in pairs(toolHitboxData) do
+                if not p.Parent then
+                    if toolHitboxData[p] and toolHitboxData[p].selBox then
+                        pcall(function() toolHitboxData[p].selBox:Destroy() end)
+                    end
+                    toolHitboxData[p]=nil
+                end
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do task.wait(0.05)
+        if stareEnabled then
+            local myChar=player.Character; if not myChar then continue end
+            local myRoot=myChar:FindFirstChild("HumanoidRootPart"); if not myRoot then continue end
+            local myHead=myChar:FindFirstChild("Head")
+            local originPos=myHead and myHead.Position or myRoot.Position
+            local function getRH(char)
+                local rh=char:FindFirstChild("RightHand") or char:FindFirstChild("RightLowerArm")
+                if rh then return rh.Position end
+                local ra=char:FindFirstChild("Right Arm"); if ra then return ra.Position end
+                local rt=char:FindFirstChild("HumanoidRootPart"); if rt then return rt.Position end
+            end
+            local targetPos=nil
+            local function isAliveChar(char)
+                if not char then return false end
+                local hum=char:FindFirstChildOfClass("Humanoid")
+                return hum and hum.Health > 0
+            end
+            local nt=findPlayer(StareTargetBox.Text)
+            if nt and isAliveChar(nt.Character) then
+                targetPos=getRH(nt.Character)
+                if targetPos then
+                    pcall(function()
+                        myRoot.CFrame=CFrame.new(myRoot.Position,Vector3.new(targetPos.X,myRoot.Position.Y,targetPos.Z))
+                    end)
+                end
+            else
+                local cr,cd=nil,25
+                for _,p in ipairs(Players:GetPlayers()) do
+                    if p~=player and isAliveChar(p.Character) then
+                        local tr=p.Character:FindFirstChild("HumanoidRootPart")
+                        if tr then
+                            local d=(myRoot.Position-tr.Position).Magnitude
+                            if d<=cd then cd=d; cr=p.Character end
+                        end
+                    end
+                end
+                if cr then
+                    targetPos=getRH(cr)
+                    if targetPos then
+                        pcall(function()
+                            myRoot.CFrame=CFrame.new(myRoot.Position,Vector3.new(targetPos.X,myRoot.Position.Y,targetPos.Z))
+                        end)
+                    end
+                end
+            end
+            if targetPos then updateStareLine(originPos,targetPos)
+            else local fwd=myRoot.CFrame*CFrame.new(0,0,-30); updateStareLine(originPos,fwd.Position) end
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do task.wait(0.5)
+        if espEnabled then
+            for _,p in ipairs(Players:GetPlayers()) do
+                if p~=player and p.Character then
+                    local root=p.Character:FindFirstChild("HumanoidRootPart")
+                    if root and not root:FindFirstChildOfClass("BillboardGui") then addESPFor(p)
+                    else
+                        local data=espData[p]
+                        if data and data.hpLbl then
+                            local hp,maxhp=getPlayerHP(p)
+                            if hp then data.hpLbl.Text="HP "..hp.." / "..maxhp; data.hpLbl.TextColor3=getHPColor(hp,maxhp) end
+                        end
+                    end
+                end
+            end
+        end
+        if locateEnabled then
+            local targets=findPlayers(LocateTextBox.Text)
+            for p in pairs(locateData) do
+                local still=false
+                for _,t in ipairs(targets) do if t==p then still=true; break end end
+                if not still then removeLocateFor(p) end
+            end
+            for _,t in ipairs(targets) do
+                if t.Character then
+                    local root=t.Character:FindFirstChild("HumanoidRootPart")
+                    if root and not root:FindFirstChildOfClass("BillboardGui") then addLocateFor(t)
+                    else
+                        local data=locateData[t]
+                        if data and data.hpLbl then
+                            local hp,maxhp=getPlayerHP(t)
+                            if hp then data.hpLbl.Text="HP "..hp.." / "..maxhp; data.hpLbl.TextColor3=getHPColor(hp,maxhp) end
+                        end
+                    end
+                end
+            end
+        end
+        if plPanel.Visible then plRefresh() end
+    end
+end)
+
+local dragging,dragInput,dragStart,startPos
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+        dragging=true; dragStart=input.Position; startPos=MainFrame.Position
+        input.Changed:Connect(function() if input.UserInputState==Enum.UserInputState.End then dragging=false end end)
+    end
+end)
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch then dragInput=input end
+end)
+UIS.InputChanged:Connect(function(input)
+    if input==dragInput and dragging then
+        local delta=input.Position-dragStart
+        MainFrame.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+delta.X,startPos.Y.Scale,startPos.Y.Offset+delta.Y)
+    end
+end)
+
+
+
+TweenService:Create(loadingFrame,TweenInfo.new(0.4),{BackgroundTransparency=1}):Play()
+TweenService:Create(loadingLabel,TweenInfo.new(0.4),{TextTransparency=1}):Play()
+task.delay(0.4,function()
+    loadingGui:Destroy()
+    local notifGui=Instance.new("ScreenGui")
+    notifGui.Name="BugToolsNotif"; notifGui.ResetOnSpawn=false; notifGui.Parent=player.PlayerGui
+    local notifFrame=Instance.new("Frame",notifGui)
+    notifFrame.Size=UDim2.new(0,260,0,36); notifFrame.Position=UDim2.new(0.5,-130,0.5,-18)
+    notifFrame.BackgroundColor3=Color3.fromRGB(15,15,15); notifFrame.BackgroundTransparency=0.2
+    notifFrame.BorderSizePixel=0
+    Instance.new("UICorner",notifFrame).CornerRadius=UDim.new(0,10)
+    local notifLabel=Instance.new("TextLabel",notifFrame)
+    notifLabel.Size=UDim2.new(1,0,1,0); notifLabel.BackgroundTransparency=1
+    notifLabel.TextColor3=Color3.fromRGB(255,220,50); notifLabel.Font=Enum.Font.SourceSansBold
+    notifLabel.TextSize=14; notifLabel.Text="Bug Tools loaded!  |  Press K to hide"
+    task.wait(3)
+    TweenService:Create(notifFrame,TweenInfo.new(0.5),{BackgroundTransparency=1}):Play()
+    TweenService:Create(notifLabel,TweenInfo.new(0.5),{TextTransparency=1}):Play()
+    task.wait(0.5); notifGui:Destroy()
+end)
+
+setGuiVisible(true)
