@@ -1363,37 +1363,31 @@ local lastDeadCFrame = nil
 local deadSpawnDiedConn = nil
 local deadSpawnSpawnConn = nil
 
-local function hookDeadSpawnDied(char)
-    if deadSpawnDiedConn then deadSpawnDiedConn:Disconnect() deadSpawnDiedConn = nil end
-    local hum = char:WaitForChild("Humanoid", 5)
-    if not hum then return end
-    deadSpawnDiedConn = hum.Died:Connect(function()
-        if not deadSpawnEnabled then return end
-        local root = char:FindFirstChild("HumanoidRootPart")
-        if root then
-            lastDeadCFrame = root.CFrame
-        end
-    end)
-end
-
 local function toggleDeadSpawn()
     deadSpawnEnabled = not deadSpawnEnabled
     DeadSpawnButton.Text = deadSpawnEnabled and "Dead Spawn: ON" or "Dead Spawn: OFF"
     DeadSpawnButton.BackgroundColor3 = deadSpawnEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(50,50,50)
     if deadSpawnEnabled then
-        if player.Character then hookDeadSpawnDied(player.Character) end
+        local function hookDied(char)
+            if deadSpawnDiedConn then deadSpawnDiedConn:Disconnect() deadSpawnDiedConn = nil end
+            local hum = char:WaitForChild("Humanoid", 5)
+            if not hum then return end
+            deadSpawnDiedConn = hum.Died:Connect(function()
+                if not deadSpawnEnabled then return end
+                local root = char:FindFirstChild("HumanoidRootPart")
+                if root then lastDeadCFrame = root.CFrame end
+            end)
+        end
+        if player.Character then hookDied(player.Character) end
         if deadSpawnSpawnConn then deadSpawnSpawnConn:Disconnect() deadSpawnSpawnConn = nil end
         deadSpawnSpawnConn = player.CharacterAdded:Connect(function(newChar)
-            if not deadSpawnEnabled then return end
-            hookDeadSpawnDied(newChar)
+            hookDied(newChar)
             if lastDeadCFrame then
                 local savedCF = lastDeadCFrame
-                task.wait(1)
+                wait(1)
                 if not deadSpawnEnabled then return end
                 local root = newChar:FindFirstChild("HumanoidRootPart")
-                if root then
-                    pcall(function() root.CFrame = savedCF end)
-                end
+                if root then pcall(function() root.CFrame = savedCF end) end
             end
         end)
     else
